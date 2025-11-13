@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import AuthGuard from "@/components/auth-guard";
 import Vault from "@/components/vault";
 import { api } from "@/lib/api";
+import { downloadText, downloadMarkdown, formatFilename } from "@/lib/download";
 
 interface SearchLink {
   url: string;
@@ -161,11 +162,23 @@ export default function DashboardPage() {
     }
   };
 
+  const handleDownloadTxt = () => {
+    if (!summary || !topic) return;
+    const filename = formatFilename(topic, "txt");
+    downloadText(summary, filename);
+  };
+
+  const handleDownloadMarkdown = () => {
+    if (!summary || !topic) return;
+    const filename = formatFilename(topic, "md");
+    downloadMarkdown(summary, filename);
+  };
+
   return (
     <AuthGuard requireAuth={true}>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-purple-50/30">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/20 to-purple-50/20">
         {/* Modern Navbar */}
-        <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-soft">
+        <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center space-x-3">
@@ -252,7 +265,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Modern Search Bar */}
-          <Card className="shadow-card border-0 bg-white mb-6">
+          <Card className="shadow-lg border-0 bg-white/90 backdrop-blur-sm mb-6 transition-all hover:shadow-xl">
             <CardContent className="p-6">
               <div className="flex gap-3">
                 <div className="flex-1 relative">
@@ -338,7 +351,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Links Sidebar - Left */}
             <div className="lg:col-span-4">
-              <Card className="shadow-card border-0 bg-white h-[calc(100vh-280px)] flex flex-col">
+              <Card className="shadow-lg border-0 bg-white/90 backdrop-blur-sm h-[calc(100vh-280px)] flex flex-col transition-all hover:shadow-xl">
                 <CardHeader className="pb-3 border-b border-slate-100">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg font-semibold text-slate-900">
@@ -384,10 +397,10 @@ export default function DashboardPage() {
                         return (
                           <div
                             key={index}
-                            className={`group p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                            className={`group p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
                               isSelected
-                                ? "bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-400 shadow-sm"
-                                : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
+                                ? "bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-400 shadow-md scale-[1.02]"
+                                : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md hover:scale-[1.01]"
                             }`}
                             onClick={() => toggleLinkSelection(link.url)}
                           >
@@ -445,47 +458,92 @@ export default function DashboardPage() {
 
             {/* Summary Area - Right */}
             <div className="lg:col-span-8">
-              <Card className="shadow-card border-0 bg-white h-[calc(100vh-280px)] flex flex-col">
+              <Card className="shadow-lg border-0 bg-white/90 backdrop-blur-sm h-[calc(100vh-280px)] flex flex-col transition-all hover:shadow-xl">
                 <CardHeader className="pb-3 border-b border-slate-100">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg font-semibold text-slate-900">
                       Summary Document
                     </CardTitle>
                     {summary && (
-                      <Button
-                        onClick={handleSaveToVault}
-                        disabled={savingToVault}
-                        className="gradient-success text-white border-0 shadow-sm hover:shadow-md h-9 text-sm"
-                      >
-                        {savingToVault ? (
-                          "Saving..."
-                        ) : (
-                          <>
-                            <svg
-                              className="w-4 h-4 mr-2"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M5 13l4 4L19 7"
-                              />
-                            </svg>
-                            Save to Vault
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          onClick={handleDownloadTxt}
+                          variant="outline"
+                          className="border-slate-200 text-slate-700 hover:bg-slate-50 h-9 text-sm"
+                        >
+                          <svg
+                            className="w-4 h-4 mr-2"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
+                          </svg>
+                          Download TXT
+                        </Button>
+                        <Button
+                          onClick={handleDownloadMarkdown}
+                          variant="outline"
+                          className="border-slate-200 text-slate-700 hover:bg-slate-50 h-9 text-sm"
+                        >
+                          <svg
+                            className="w-4 h-4 mr-2"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
+                          </svg>
+                          Download MD
+                        </Button>
+                        <Button
+                          onClick={handleSaveToVault}
+                          disabled={savingToVault}
+                          className="gradient-success text-white border-0 shadow-sm hover:shadow-md h-9 text-sm"
+                        >
+                          {savingToVault ? (
+                            "Saving..."
+                          ) : (
+                            <>
+                              <svg
+                                className="w-4 h-4 mr-2"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                              Save to Vault
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </CardHeader>
                 <CardContent className="flex-1 overflow-y-auto p-6">
                   {summary ? (
                     <div className="prose prose-slate max-w-none">
-                      <div className="whitespace-pre-wrap text-slate-700 leading-relaxed bg-gradient-to-br from-slate-50 to-white p-6 rounded-xl border border-slate-200">
-                        {summary}
+                      <div className="whitespace-pre-wrap text-slate-700 leading-relaxed bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 p-8 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="font-mono text-xs text-slate-400 mb-4 pb-4 border-b border-slate-200">
+                          Generated on {new Date().toLocaleString()}
+                        </div>
+                        <div className="text-base leading-7">{summary}</div>
                       </div>
                     </div>
                   ) : (
@@ -523,7 +581,7 @@ export default function DashboardPage() {
                     <Button
                       onClick={handleSummarize}
                       disabled={summarizing || selectedLinks.length === 0}
-                      className="w-full gradient-primary text-white h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50"
+                      className="w-full gradient-primary text-white h-12 text-base font-semibold shadow-md hover:shadow-xl hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {summarizing ? (
                         <>

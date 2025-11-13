@@ -34,19 +34,82 @@ router.post("/", async (req, res) => {
       const $ = cheerio.load(response.data);
       const links = [];
 
-      // Extract top search results
-      $("a.result__a").each((index, element) => {
-        if (index < 10) {
-          const url = $(element).attr("href");
+      // Extract top search results - try multiple selectors
+      const selectors = [
+        "a.result__a",
+        "a.result-link",
+        ".result__title a",
+        ".web-result a",
+        ".links_main a",
+      ];
+
+      const seenUrls = new Set();
+
+      for (const selector of selectors) {
+        $(selector).each((index, element) => {
+          if (links.length >= 10) return false; // Stop if we have enough
+
+          let url = $(element).attr("href");
           const title = $(element).text().trim();
-          if (url && title) {
-            links.push({
-              url: url.replace(/^\/\/?/, "https://"),
-              title: title,
-            });
+
+          if (!url || !title || title.length < 5) return;
+
+          // Clean and validate URL
+          url = url.trim();
+
+          // Handle DuckDuckGo redirect URLs
+          if (url.startsWith("/l/?kh=") || url.startsWith("/l/")) {
+            // Extract actual URL from DuckDuckGo redirect
+            const match = url.match(/uddg=([^&]+)/);
+            if (match) {
+              url = decodeURIComponent(match[1]);
+            } else {
+              // Try to get from onclick or data attribute
+              const onclick = $(element).attr("onclick");
+              if (onclick) {
+                const urlMatch = onclick.match(/uddg='([^']+)'/);
+                if (urlMatch) {
+                  url = decodeURIComponent(urlMatch[1]);
+                }
+              }
+            }
           }
-        }
-      });
+
+          // Ensure URL is absolute
+          if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            if (url.startsWith("//")) {
+              url = "https:" + url;
+            } else if (url.startsWith("/")) {
+              // Skip relative URLs - we need absolute URLs
+              return;
+            } else {
+              url = "https://" + url;
+            }
+          }
+
+          // Skip search engine URLs and invalid URLs
+          if (
+            url.includes("google.com/search") ||
+            url.includes("duckduckgo.com") ||
+            url.includes("bing.com/search") ||
+            url.includes("yahoo.com/search") ||
+            !url.match(/^https?:\/\/.+/)
+          ) {
+            return;
+          }
+
+          // Avoid duplicates
+          if (seenUrls.has(url)) return;
+          seenUrls.add(url);
+
+          links.push({
+            url: url,
+            title: title,
+          });
+        });
+
+        if (links.length >= 10) break;
+      }
 
       // If DuckDuckGo doesn't work well, provide fallback top websites
       if (links.length === 0) {

@@ -1,0 +1,354 @@
+# MindBrief AI Summarizer - Project Workflow
+
+## Overview
+This document describes the complete workflow of the MindBrief AI Summarizer application, from user interaction to data storage.
+
+## Architecture
+- **Frontend**: Next.js 15 with React 19, TypeScript, Tailwind CSS
+- **Backend**: Express.js with Node.js
+- **AI**: Google Gemini API for summarization
+- **Database**: Firebase Firestore (optional, with in-memory fallback)
+- **Authentication**: Firebase Authentication
+
+## User Flow
+
+### 1. Authentication Flow
+```
+User visits app → Login/Sign Up page
+  ↓
+User authenticates via Firebase Auth
+  ↓
+Auth state checked by AuthGuard component
+  ↓
+If authenticated → Redirect to Dashboard
+If not authenticated → Stay on Login page
+```
+
+### 2. Search Flow
+```
+User enters topic in search box
+  ↓
+Frontend: api.search.searchTopic(topic)
+  ↓
+Backend: POST /api/search
+  ↓
+Backend scrapes DuckDuckGo search results
+  ↓
+Backend extracts URLs and titles
+  ↓
+Backend filters out search engine URLs
+  ↓
+Backend returns list of links
+  ↓
+Frontend displays links in sidebar
+```
+
+### 3. Link Selection Flow
+```
+User clicks on links in sidebar
+  ↓
+Frontend: toggleLinkSelection(url)
+  ↓
+Selected links stored in state (selectedLinks array)
+  ↓
+Selected links highlighted with checkmark
+  ↓
+User can select/deselect multiple links
+```
+
+### 4. Summarization Flow
+```
+User clicks "Generate Summary" button
+  ↓
+Frontend: api.summarize.summarizeUrls(topic, selectedLinks)
+  ↓
+Backend: POST /api/summarize
+  ↓
+Backend validates URLs (skips search result pages)
+  ↓
+Backend scrapes content from each URL in parallel:
+  - Sends HTTP GET request with proper headers
+  - Parses HTML with Cheerio
+  - Extracts main content (article, main, content containers)
+  - Removes unwanted elements (nav, footer, ads, etc.)
+  - Cleans and formats content
+  ↓
+Backend filters valid content (length > 30 chars)
+  ↓
+If Gemini API key configured:
+  - Combines all content
+  - Sends to Gemini API (gemini-1.5-flash model)
+  - Gets AI-generated summary
+Else:
+  - Creates formatted summary from scraped content
+  ↓
+Backend returns summary with sources
+  ↓
+Frontend displays summary in main content area
+```
+
+### 5. Vault Storage Flow
+```
+User clicks "Save to Vault" button
+  ↓
+Frontend: api.vault.saveItem(userId, {topic, summary, sources})
+  ↓
+Backend: POST /api/vault/:userId
+  ↓
+Backend checks Firebase Admin initialization:
+  If Firebase Admin configured:
+    - Saves to Firestore collection "vaults"
+    - Document ID = userId
+    - Stores items array with new item
+  Else:
+    - Saves to in-memory Map (inMemoryVault)
+  ↓
+Backend returns success response
+  ↓
+Frontend shows success message
+  ↓
+Vault automatically opens
+```
+
+### 6. Vault Retrieval Flow
+```
+User clicks "Vault" button
+  ↓
+Frontend: api.vault.getItems(userId)
+  ↓
+Backend: GET /api/vault/:userId
+  ↓
+Backend checks Firebase Admin:
+  If Firebase Admin configured:
+    - Queries Firestore for user's vault document
+    - Returns items array
+  Else:
+    - Returns items from in-memory Map
+  ↓
+Frontend displays list of saved summaries
+  ↓
+User can click on any summary to view details
+  ↓
+User can delete summaries
+```
+
+### 7. Download Flow
+```
+User clicks download button (TXT or Markdown)
+  ↓
+Frontend: downloadText() or downloadMarkdown()
+  ↓
+Creates blob with summary content
+  ↓
+Creates download link
+  ↓
+Triggers browser download
+  ↓
+File saved to user's downloads folder
+```
+
+## Data Flow
+
+### Request Flow
+```
+Frontend (React Component)
+  ↓
+Frontend API Client (lib/api.ts)
+  ↓
+HTTP Request to Backend
+  ↓
+Backend Express Router
+  ↓
+Route Handler (routes/*.js)
+  ↓
+Business Logic
+  ↓
+External Services (Gemini API, Firebase, Web Scraping)
+  ↓
+Response back through chain
+```
+
+### State Management
+- **Frontend**: React useState hooks for component state
+- **Auth State**: Firebase onAuthStateChanged listener
+- **Backend**: In-memory Map for vault (if Firebase not configured)
+- **Database**: Firebase Firestore (if configured)
+
+## Error Handling Flow
+
+### Frontend Error Handling
+```
+API Request fails
+  ↓
+Catch error in try-catch block
+  ↓
+Log error to console
+  ↓
+Show user-friendly alert message
+  ↓
+Update backend status to "offline"
+```
+
+### Backend Error Handling
+```
+Route handler catches error
+  ↓
+Logs error details to console
+  ↓
+Returns appropriate HTTP status code
+  ↓
+Returns error message in JSON response
+  ↓
+Frontend receives and handles error
+```
+
+### Scraping Error Handling
+```
+URL scraping fails
+  ↓
+Error caught in scrape promise
+  ↓
+Returns error object with URL and error message
+  ↓
+Failed URLs filtered out
+  ↓
+If all URLs fail → Return error response
+  ↓
+If some URLs succeed → Continue with valid content
+```
+
+## Security Flow
+
+### Authentication
+```
+User login/signup
+  ↓
+Firebase Auth validates credentials
+  ↓
+JWT token generated
+  ↓
+Token stored in browser (Firebase handles)
+  ↓
+Protected routes check auth state
+  ↓
+API requests include user ID from auth context
+```
+
+### Rate Limiting
+```
+Request arrives at backend
+  ↓
+Express rate limiter middleware checks
+  ↓
+If within limit → Process request
+  ↓
+If exceeded → Return 429 Too Many Requests
+```
+
+### CORS
+```
+Frontend makes request
+  ↓
+Backend CORS middleware checks origin
+  ↓
+If origin allowed → Add CORS headers
+  ↓
+Request proceeds
+```
+
+## Environment Variables Flow
+
+### Backend (.env)
+```
+Server starts
+  ↓
+dotenv loads .env file
+  ↓
+Environment variables available in process.env
+  ↓
+Routes use variables:
+  - GEMINI_API_KEY for AI summarization
+  - FIREBASE_SERVICE_ACCOUNT for persistent storage
+  - PORT for server port
+```
+
+### Frontend (.env.local)
+```
+Next.js build/dev starts
+  ↓
+Loads NEXT_PUBLIC_* variables
+  ↓
+Variables available in process.env
+  ↓
+Firebase config uses these variables
+```
+
+## Deployment Flow
+
+### Development
+```
+1. Start backend: cd backend && npm run dev
+2. Start frontend: cd frontend && npm run dev
+3. Access: http://localhost:3000
+```
+
+### Production
+```
+1. Build frontend: cd frontend && npm run build
+2. Start backend: cd backend && npm start
+3. Start frontend: cd frontend && npm start
+4. Configure environment variables
+5. Set up Firebase (optional)
+```
+
+## Key Components
+
+### Frontend Components
+- **AuthGuard**: Protects routes, checks authentication
+- **Vault**: Displays and manages saved summaries
+- **Dashboard**: Main page with search and summarization
+- **Login**: Authentication page
+
+### Backend Routes
+- **/api/search**: Search for websites
+- **/api/search/scrape**: Scrape single URL
+- **/api/summarize**: Generate summary from URLs
+- **/api/vault/:userId**: CRUD operations for vault
+- **/api/health**: Health check endpoint
+
+## External Services
+
+### Google Gemini API
+- Used for AI-powered summarization
+- Model: gemini-1.5-flash
+- Free tier available
+- Requires API key
+
+### Firebase Services
+- **Authentication**: User login/signup
+- **Firestore**: Persistent vault storage (optional)
+- **Admin SDK**: Backend access to Firestore
+
+### Web Scraping
+- **DuckDuckGo**: Search results
+- **Cheerio**: HTML parsing
+- **Axios**: HTTP requests
+
+## Performance Optimizations
+
+1. **Parallel Scraping**: All URLs scraped simultaneously
+2. **Content Filtering**: Removes unnecessary content early
+3. **Caching**: In-memory vault for fast access
+4. **Rate Limiting**: Prevents abuse
+5. **Error Recovery**: Graceful fallbacks
+
+## Future Enhancements
+
+1. Add caching layer for scraped content
+2. Implement background job processing
+3. Add export to PDF functionality
+4. Support for more file formats
+5. Add search history
+6. Implement sharing functionality
+7. Add tags/categories for vault items
+

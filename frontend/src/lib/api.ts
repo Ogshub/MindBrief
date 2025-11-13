@@ -88,3 +88,4 @@ export const api = {
   // Health check
   health: () => api.request("/api/health", { method: "GET" }),
 };
+

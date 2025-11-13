@@ -1,12 +1,12 @@
 const express = require("express");
 const axios = require("axios");
-const OpenAI = require("openai");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const router = express.Router();
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Initialize Gemini client
+const genAI = process.env.GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+  : null;
 
 // Summarize content from multiple URLs
 router.post("/", async (req, res) => {
@@ -27,12 +27,47 @@ router.post("/", async (req, res) => {
     const cheerio = require("cheerio");
     const scrapePromises = urls.map(async (url) => {
       try {
-        const response = await axios.get(url, {
+        // Validate and clean URL
+        let cleanUrl = url.trim();
+        if (
+          !cleanUrl.startsWith("http://") &&
+          !cleanUrl.startsWith("https://")
+        ) {
+          cleanUrl = "https://" + cleanUrl;
+        }
+
+        // Skip search result URLs and redirect URLs
+        if (
+          cleanUrl.includes("google.com/search") ||
+          cleanUrl.includes("duckduckgo.com") ||
+          cleanUrl.includes("bing.com/search")
+        ) {
+          console.log(`Skipping search result URL: ${cleanUrl}`);
+          return {
+            url: cleanUrl,
+            title: "Search Result (Skipped)",
+            content:
+              "This is a search result page, not a content page. Please select a direct article URL.",
+          };
+        }
+
+        console.log(`Scraping URL: ${cleanUrl}`);
+        const response = await axios.get(cleanUrl, {
           headers: {
             "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            Connection: "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
           },
-          timeout: 10000,
+          timeout: 15000,
+          maxRedirects: 5,
+          validateStatus: function (status) {
+            return status >= 200 && status < 400; // Accept redirects
+          },
         });
 
         const $ = cheerio.load(response.data);
@@ -78,63 +113,179 @@ router.post("/", async (req, res) => {
         }
 
         if (mainContainer && mainContainer.length > 0) {
-          // Extract structured content
+          // Extract structured content - preserve headings and paragraphs
           mainContainer
-            .find("p, h1, h2, h3, h4, h5, h6, li, blockquote")
+            .find("p, h1, h2, h3, h4, h5, h6, li, blockquote, div")
             .each((i, elem) => {
-              const text = $(elem).text().trim();
-              if (text.length > 20) {
-                contentElements.push(text);
+              const $elem = $(elem);
+              const tagName = $elem.prop("tagName")?.toLowerCase();
+              const text = $elem.text().trim();
+
+              // Skip if it's a div with no meaningful text or if it's too short
+              if (tagName === "div" && text.length < 50) {
+                return;
+              }
+
+              // Include headings and meaningful paragraphs
+              if (
+                text.length > 15 &&
+                !text.match(
+                  /^(skip|menu|navigation|footer|header|cookie|privacy)/i
+                )
+              ) {
+                // Preserve heading structure
+                if (tagName && tagName.match(/^h[1-6]$/)) {
+                  contentElements.push(`\n## ${text}\n`);
+                } else {
+                  contentElements.push(text);
+                }
               }
             });
           content = contentElements.join("\n\n");
         } else {
-          // Fallback: extract paragraphs and headings
-          $("body p, body h1, body h2, body h3, body h4, body h5, body h6")
-            .not("nav p, footer p, header p")
+          // Fallback: extract paragraphs and headings from body
+          $(
+            "body p, body h1, body h2, body h3, body h4, body h5, body h6, body li"
+          )
+            .not("nav p, footer p, header p, nav li, footer li, header li")
             .each((i, elem) => {
-              const text = $(elem).text().trim();
-              if (text.length > 20) {
-                contentElements.push(text);
+              const $elem = $(elem);
+              const tagName = $elem.prop("tagName")?.toLowerCase();
+              const text = $elem.text().trim();
+
+              if (
+                text.length > 15 &&
+                !text.match(
+                  /^(skip|menu|navigation|footer|header|cookie|privacy)/i
+                )
+              ) {
+                if (tagName && tagName.match(/^h[1-6]$/)) {
+                  contentElements.push(`\n## ${text}\n`);
+                } else {
+                  contentElements.push(text);
+                }
               }
             });
           content = contentElements.join("\n\n");
         }
 
-        // Clean up
-        content = content.replace(/\s+/g, " ").trim();
+        // Clean up excessive whitespace but preserve paragraph breaks
+        content = content
+          .replace(/\n{3,}/g, "\n\n") // Max 2 newlines
+          .replace(/[ \t]+/g, " ") // Multiple spaces to single
+          .trim();
 
-        // Ensure meaningful content
+        // Ensure meaningful content - try harder to get text
         if (content.length < 50) {
           const body = $("body");
-          body.find("script, style, nav, footer, header").remove();
-          content = body.text().replace(/\s+/g, " ").trim();
+          body
+            .find(
+              "script, style, nav, footer, header, aside, .ad, .advertisement, .sidebar, .menu, .navigation"
+            )
+            .remove();
+
+          // Try to get all paragraph text
+          const allText = body
+            .find("p, div, span")
+            .not(
+              "nav p, footer p, header p, nav div, footer div, header div, nav span, footer span, header span"
+            )
+            .map((i, elem) => $(elem).text().trim())
+            .get()
+            .filter((text) => text.length > 15)
+            .join("\n\n");
+
+          if (allText.length > content.length) {
+            content = allText;
+          }
+
+          // Last resort - get all body text
+          if (content.length < 50) {
+            const bodyText = body.text().replace(/\s+/g, " ").trim();
+            // Filter out very short or common navigation text
+            if (bodyText.length > 100) {
+              content = bodyText;
+            }
+          }
         }
 
-        // Limit content per page but keep it substantial
-        if (content.length > 15000) {
-          content = content.substring(0, 15000) + "...";
+        // Log content length for debugging
+        console.log(`Extracted ${content.length} characters from ${cleanUrl}`);
+
+        // Limit content per page but keep it substantial (increased limit)
+        if (content.length > 25000) {
+          content = content.substring(0, 25000) + "\n\n[Content truncated...]";
         }
 
         return {
-          url,
+          url: cleanUrl,
           title,
           content: content || "No content available",
         };
       } catch (error) {
         console.error(`Error scraping ${url}:`, error.message);
+        console.error(
+          `Error details:`,
+          error.response?.status,
+          error.response?.statusText
+        );
         return {
-          url,
+          url: url.trim(),
           title: "Error",
-          content: `Failed to scrape content from this URL: ${error.message}`,
+          content: `Failed to scrape content from this URL: ${
+            error.message
+          }. Status: ${error.response?.status || "N/A"}`,
         };
       }
     });
 
     const scrapedContents = await Promise.all(scrapePromises);
 
-    // Combine all content
-    const combinedContent = scrapedContents
+    // Filter out sources with no meaningful content
+    const validContents = scrapedContents.filter(
+      (item) =>
+        item.content &&
+        item.content.length > 30 &&
+        !item.content.includes("Failed to scrape") &&
+        !item.content.includes("Search Result (Skipped)")
+    );
+
+    console.log(
+      `Scraped ${scrapedContents.length} URLs, ${validContents.length} have valid content`
+    );
+
+    // Log details about failed scrapes
+    scrapedContents.forEach((item, index) => {
+      if (!validContents.includes(item)) {
+        console.log(
+          `Failed scrape ${index + 1}: ${item.url} - Content length: ${
+            item.content?.length || 0
+          }`
+        );
+      }
+    });
+
+    if (validContents.length === 0) {
+      const errorDetails = scrapedContents.map((item) => ({
+        url: item.url,
+        title: item.title,
+        contentLength: item.content?.length || 0,
+        error: item.content?.includes("Failed to scrape")
+          ? "Scraping failed"
+          : "Insufficient content",
+      }));
+
+      return res.status(400).json({
+        error:
+          "Failed to extract meaningful content from any of the provided URLs",
+        details: errorDetails,
+        suggestion:
+          "Please ensure you're selecting direct article URLs, not search result pages. Try selecting links that go directly to articles or content pages.",
+      });
+    }
+
+    // Combine all content for Gemini (with source info)
+    const combinedContent = validContents
       .map((item, index) => {
         return `Source ${index + 1} - ${item.title} (${item.url}):\n${
           item.content
@@ -142,22 +293,177 @@ router.post("/", async (req, res) => {
       })
       .join("\n---\n\n");
 
-    // If no OpenAI API key, return combined content without AI summarization
-    if (!process.env.OPENAI_API_KEY) {
+    // Create a formatted single-page document from scraped content
+    const createFormattedSummary = (contents, topic) => {
+      let summary = `${topic}\n\n`;
+      summary += `${"=".repeat(topic.length)}\n\n`;
+
+      // Introduction
+      summary += `OVERVIEW\n\n`;
+      summary += `This document consolidates information from ${
+        contents.length
+      } source${
+        contents.length > 1 ? "s" : ""
+      } about ${topic}. The following sections present key information, insights, and findings from these sources.\n\n`;
+      summary += `${"-".repeat(60)}\n\n`;
+
+      // Combine all content into sections
+      const allContent = contents.map((item) => item.content).join("\n\n");
+
+      // Split into paragraphs and organize, preserving markdown headings
+      const lines = allContent.split("\n");
+      const paragraphs = [];
+      let currentPara = "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+
+        // Skip empty lines (we'll add them back)
+        if (!trimmed) {
+          if (currentPara) {
+            paragraphs.push(currentPara.trim());
+            currentPara = "";
+          }
+          continue;
+        }
+
+        // Detect markdown headings
+        if (trimmed.startsWith("##")) {
+          if (currentPara) {
+            paragraphs.push(currentPara.trim());
+            currentPara = "";
+          }
+          paragraphs.push(trimmed); // Keep heading as-is
+        } else if (
+          trimmed.startsWith("#") ||
+          trimmed.match(/^[A-Z][A-Z\s]{10,}$/)
+        ) {
+          // Potential heading (all caps, short)
+          if (currentPara) {
+            paragraphs.push(currentPara.trim());
+            currentPara = "";
+          }
+          if (
+            trimmed.length < 80 &&
+            !trimmed.endsWith(".") &&
+            !trimmed.endsWith("!") &&
+            !trimmed.endsWith("?")
+          ) {
+            paragraphs.push(`\n${trimmed.toUpperCase()}\n`);
+          } else {
+            currentPara += trimmed + " ";
+          }
+        } else {
+          // Regular paragraph text
+          currentPara += trimmed + " ";
+        }
+      }
+
+      if (currentPara) {
+        paragraphs.push(currentPara.trim());
+      }
+
+      // Filter and clean paragraphs
+      const cleanParagraphs = paragraphs
+        .map((p) => p.trim())
+        .filter((p) => {
+          // Remove URLs, sources, and very short content
+          if (p.length < 30) return false;
+          if (p.match(/^(Source|http|www\.|https?:\/\/)/i)) return false;
+          if (
+            p.match(
+              /^(skip|menu|navigation|footer|header|cookie|privacy|terms)/i
+            )
+          )
+            return false;
+          return true;
+        });
+
+      // Remove duplicate or very similar paragraphs
+      const uniqueParagraphs = [];
+      const seen = new Set();
+      for (const para of cleanParagraphs) {
+        // Create a signature for the paragraph (first 150 chars, normalized)
+        const signature = para
+          .substring(0, 150)
+          .toLowerCase()
+          .replace(/[^\w\s]/g, "")
+          .replace(/\s+/g, " ");
+
+        if (!seen.has(signature) && para.length > 40) {
+          seen.add(signature);
+          uniqueParagraphs.push(para);
+        }
+      }
+
+      // Organize content into logical sections
+      summary += `KEY INFORMATION\n\n`;
+
+      // Add paragraphs, preserving structure
+      let paragraphCount = 0;
+      for (let i = 0; i < uniqueParagraphs.length; i++) {
+        const para = uniqueParagraphs[i];
+
+        // If it's a heading (starts with ## or is all caps and short)
+        if (
+          para.startsWith("##") ||
+          (para.length < 80 &&
+            para === para.toUpperCase() &&
+            !para.endsWith("."))
+        ) {
+          summary += `\n${para}\n\n`;
+        } else {
+          summary += `${para}\n\n`;
+          paragraphCount++;
+        }
+
+        // Limit total length to keep it readable (but allow more content)
+        if (summary.length > 30000 || paragraphCount > 100) {
+          summary += `\n\n[Additional content available in source materials]\n\n`;
+          break;
+        }
+      }
+
+      // Conclusion
+      summary += `${"-".repeat(60)}\n\n`;
+      summary += `SUMMARY\n\n`;
+      summary += `The information presented above provides a comprehensive overview of ${topic}, drawing from multiple authoritative sources. Key points and insights have been consolidated to present a unified understanding of the topic.\n\n`;
+
+      // Note about sources (not in main content body)
+      summary += `${"-".repeat(60)}\n\n`;
+      summary += `Note: This summary was compiled from ${
+        contents.length
+      } source${
+        contents.length > 1 ? "s" : ""
+      }. Source URLs are available in the sources section.\n`;
+
+      return summary;
+    };
+
+    // If no Gemini API key, return formatted summary
+    if (
+      !genAI ||
+      !process.env.GEMINI_API_KEY ||
+      !process.env.GEMINI_API_KEY.trim() ||
+      process.env.GEMINI_API_KEY === "your-gemini-api-key"
+    ) {
+      const formattedSummary = createFormattedSummary(validContents, topic);
       return res.json({
         success: true,
         topic: topic,
-        summary: combinedContent,
-        sources: scrapedContents.map((item) => ({
+        summary: formattedSummary,
+        sources: validContents.map((item) => ({
           url: item.url,
           title: item.title,
         })),
-        note: "OpenAI API key not configured. Showing combined content instead of AI summary.",
+        note: "Gemini API key not configured. Showing formatted content summary.",
       });
     }
 
-    // Use OpenAI to summarize
+    // Use Gemini to summarize
     try {
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
       const prompt = `You are an expert researcher and technical writer. Based on the following content from multiple sources about "${topic}", create a comprehensive, well-organized single-page summary document that:
 
 1. Starts with an executive summary/introduction (2-3 sentences)
@@ -176,47 +482,32 @@ ${combinedContent.substring(0, 120000)}
 
 Create a comprehensive, single-page summary document about "${topic}":`;
 
-      const completion = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an expert researcher and technical writer who creates comprehensive, accurate summaries from multiple sources.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        max_tokens: 4000,
-        temperature: 0.5,
-      });
-
-      const summary =
-        completion.choices[0]?.message?.content || combinedContent;
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const summary = response.text() || combinedContent;
 
       return res.json({
         success: true,
         topic: topic,
         summary: summary,
-        sources: scrapedContents.map((item) => ({
+        sources: validContents.map((item) => ({
           url: item.url,
           title: item.title,
         })),
       });
-    } catch (openaiError) {
-      console.error("OpenAI error:", openaiError.message);
-      // Fallback to combined content
+    } catch (geminiError) {
+      console.error("Gemini error:", geminiError.message);
+      // Fallback to formatted summary
+      const formattedSummary = createFormattedSummary(validContents, topic);
       return res.json({
         success: true,
         topic: topic,
-        summary: combinedContent,
-        sources: scrapedContents.map((item) => ({
+        summary: formattedSummary,
+        sources: validContents.map((item) => ({
           url: item.url,
           title: item.title,
         })),
-        note: "AI summarization failed. Showing combined content instead.",
+        note: "AI summarization failed. Showing formatted content summary instead.",
       });
     }
   } catch (error) {

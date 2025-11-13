@@ -5,6 +5,7 @@ const router = express.Router();
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
   try {
+    // Try service account JSON first (most secure)
     const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
       ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
       : null;
@@ -13,13 +14,34 @@ if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
+      console.log("✅ Firebase Admin initialized with service account");
+    }
+    // Try using project ID and application default credentials
+    else if (process.env.FIREBASE_PROJECT_ID) {
+      admin.initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+      });
+      console.log("✅ Firebase Admin initialized with project ID");
+    }
+    // Try using GOOGLE_APPLICATION_CREDENTIALS environment variable
+    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
+      });
+      console.log(
+        "✅ Firebase Admin initialized with application default credentials"
+      );
     } else {
       console.warn(
-        "Firebase Admin not configured. Vault storage will use in-memory storage (not persistent)."
+        "⚠️  Firebase Admin not configured. Vault storage will use in-memory storage (not persistent)."
+      );
+      console.warn(
+        "   To enable persistent storage, set FIREBASE_SERVICE_ACCOUNT, FIREBASE_PROJECT_ID, or GOOGLE_APPLICATION_CREDENTIALS in your .env file"
       );
     }
   } catch (error) {
-    console.error("Firebase Admin initialization error:", error.message);
+    console.error("❌ Firebase Admin initialization error:", error.message);
+    console.warn("   Falling back to in-memory storage");
   }
 }
 
